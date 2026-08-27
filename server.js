@@ -126,20 +126,10 @@ app.post('/api/export-pdf', async (req, res) => {
 
     const pdfBuffer = await htmlToPdfBuffer(html);
 
-    // বাংলা নাম হেডারে দিলে error হয় — শুধু ASCII
-    const rawName = (req.body && req.body.filename) || 'slides-16x9.pdf';
-    let safe = String(rawName)
-      .replace(/[^\w.\-]+/g, '_')
-      .replace(/_+/g, '_')
-      .replace(/^_|_$/g, '')
-      .slice(0, 80);
-    if (!safe || safe === '.pdf') safe = 'slides-16x9';
-    if (!/\.pdf$/i.test(safe)) safe += '.pdf';
-
     res.setHeader('Content-Type', 'application/pdf');
-    res.setHeader('Content-Disposition', 'attachment; filename="' + safe + '"');
+    res.setHeader('Content-Disposition', 'attachment; filename="slides-16x9.pdf"');
     res.setHeader('Content-Length', String(pdfBuffer.length));
-    res.send(pdfBuffer);
+    res.send(Buffer.from(pdfBuffer));
   } catch (err) {
     console.error('export-pdf error:', err);
     res.status(500).json({ error: err.message || 'PDF generation failed' });
@@ -154,7 +144,7 @@ app.post('/api/export-pdf-upload', upload.single('file'), async (req, res) => {
     const pdfBuffer = await htmlToPdfBuffer(html);
     res.setHeader('Content-Type', 'application/pdf');
     res.setHeader('Content-Disposition', 'attachment; filename="slides-16x9.pdf"');
-    res.send(pdfBuffer);
+    res.send(Buffer.from(pdfBuffer));
   } catch (err) {
     res.status(500).json({ error: err.message || 'PDF generation failed' });
   }
