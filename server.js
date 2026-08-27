@@ -1,30 +1,27 @@
 /**
  * HTML → 16:9 PDF (Puppeteer / headless Chrome)
- * POST /api/export-pdf  { html: "<!DOCTYPE html>..." } or multipart file
- * Returns application/pdf
+ * POST /api/export-pdf  { html: "<!DOCTYPE html>..." }
  */
-
 const express = require('express');
 const cors = require('cors');
 const multer = require('multer');
 const path = require('path');
 const puppeteer = require('puppeteer');
+const fs = require('fs');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 const upload = multer({
   storage: multer.memoryStorage(),
-  limits: { fileSize: 25 * 1024 * 1024 }, // 25MB
+  limits: { fileSize: 25 * 1024 * 1024 },
 });
 
 app.use(cors());
 app.use(express.json({ limit: '25mb' }));
 app.use(express.urlencoded({ extended: true, limit: '25mb' }));
-// Serve UI from /public or repo root (GitHub upload often puts index.html at root)
 app.use(express.static(path.join(__dirname, 'public')));
 app.use(express.static(__dirname));
 
-const fs = require('fs');
 app.get('/', (req, res) => {
   const candidates = [
     path.join(__dirname, 'public', 'index.html'),
@@ -33,25 +30,13 @@ app.get('/', (req, res) => {
   for (const p of candidates) {
     if (fs.existsSync(p)) return res.sendFile(p);
   }
-  res.status(404).send('index.html not found. Upload public/index.html or index.html to the repo.');
+  res.status(404).send('index.html not found.');
 });
 
-/** CSS forced before print — exact 16:9 pages */
 const FORCE_16x9_CSS = `
-@page {
-  size: 16in 9in;
-  margin: 0;
-}
-html, body {
-  margin: 0 !important;
-  padding: 0 !important;
-  width: 16in !important;
-  background: #000;
-}
-.slide,
-.slide-frame,
-.pg,
-.slide-wrapper {
+@page { size: 16in 9in; margin: 0; }
+html, body { margin: 0 !important; padding: 0 !important; width: 16in !important; background: #000; }
+.slide, .slide-frame, .pg, .slide-wrapper {
   page-break-after: always !important;
   break-after: page !important;
   width: 16in !important;
@@ -62,9 +47,7 @@ html, body {
   overflow: hidden !important;
   box-sizing: border-box !important;
 }
-.slide:last-child,
-.slide-frame:last-child,
-.pg:last-child {
+.slide:last-child, .slide-frame:last-child, .pg:last-child {
   page-break-after: auto !important;
   break-after: auto !important;
 }
@@ -78,13 +61,7 @@ html, body {
 function wrapHtmlIfNeeded(html) {
   const raw = String(html || '').trim();
   if (!raw) return null;
-
-  // Full document
-  if (/<html[\s>]/i.test(raw) || /<!DOCTYPE/i.test(raw)) {
-    return raw;
-  }
-
-  // Fragment → full page
+  if (/<html[\s>]/i.test(raw) || /<!DOCTYPE/i.test(raw)) return raw;
   return `<!DOCTYPE html>
 <html>
 <head>
@@ -100,9 +77,7 @@ ${raw}
 
 async function htmlToPdfBuffer(html) {
   const documentHtml = wrapHtmlIfNeeded(html);
-  if (!documentHtml) {
-    throw new Error('HTML খালি');
-  }
+  if (!documentHtml) throw new Error('HTML খালি');
 
   const browser = await puppeteer.launch({
     headless: true,
@@ -116,86 +91,71 @@ async function htmlToPdfBuffer(html) {
 
   try {
     const page = await browser.newPage();
-    // Viewport roughly 16:9 for layout (CSS @page controls PDF page size)
     await page.setViewport({ width: 1920, height: 1080, deviceScaleFactor: 1 });
-
     await page.setContent(documentHtml, {
       waitUntil: ['load', 'networkidle0'],
       timeout: 120000,
     });
-
-    // Force 16:9 print CSS
     await page.addStyleTag({ content: FORCE_16x9_CSS });
-
-    // Wait fonts if any
     try {
       await page.evaluate(() => (document.fonts && document.fonts.ready) || Promise.resolve());
     } catch (_) {}
-
     await new Promise((r) => setTimeout(r, 300));
 
-    const pdf = await page.pdf({
+    return await page.pdf({
       width: '16in',
       height: '9in',
       printBackground: true,
       preferCSSPageSize: true,
       margin: { top: 0, right: 0, bottom: 0, left: 0 },
     });
-
-    return pdf;
   } finally {
     await browser.close();
   }
 }
 
-/** JSON body: { html: "..." } */
 app.post('/api/export-pdf', async (req, res) => {
   try {
     let html = req.body && req.body.html;
-
-    // Optional: file field via multipart (same route with multer)
     if (!html && req.file && req.file.buffer) {
       html = req.file.buffer.toString('utf8');
     }
-
     if (!html || !String(html).trim()) {
-      return res.status(400).json({ error: 'html required — JSON { html } or file upload' });
+      return res.status(400).json({ error: 'html required' });
     }
 
     const pdfBuffer = await htmlToPdfBuffer(html);
-    const name = (req.body && req.body.filename) || 'slides-16x9.pdf';
-    const safe = String(name).replace(/[^\w.\u0980-\u09FF-]+/g, '_').slice(0, 80) || 'slides-16x9.pdf';
-    const filename = safe.toLowerCase().endsWith('.pdf') ? safe : safe + '.pdf';
+
+    // বাংলা নাম হেডারে দিলে error হয় — শুধু ASCII
+    const rawName = (req.body && req.body.filename) || 'slides-16x9.pdf';
+    let safe = String(rawName)
+      .replace(/[^\w.\-]+/g, '_')
+      .replace(/_+/g, '_')
+      .replace(/^_|_$/g, '')
+      .slice(0, 80);
+    if (!safe || safe === '.pdf') safe = 'slides-16x9';
+    if (!/\.pdf$/i.test(safe)) safe += '.pdf';
 
     res.setHeader('Content-Type', 'application/pdf');
-    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
-    res.setHeader('Content-Length', pdfBuffer.length);
+    res.setHeader('Content-Disposition', 'attachment; filename="' + safe + '"');
+    res.setHeader('Content-Length', String(pdfBuffer.length));
     res.send(pdfBuffer);
   } catch (err) {
     console.error('export-pdf error:', err);
-    res.status(500).json({
-      error: err.message || 'PDF generation failed',
-    });
+    res.status(500).json({ error: err.message || 'PDF generation failed' });
   }
 });
 
-/** Multipart: field "html" or file "file" */
 app.post('/api/export-pdf-upload', upload.single('file'), async (req, res) => {
   try {
     let html = (req.body && req.body.html) || '';
-    if (req.file && req.file.buffer) {
-      html = req.file.buffer.toString('utf8');
-    }
-    if (!html.trim()) {
-      return res.status(400).json({ error: 'file or html required' });
-    }
-
+    if (req.file && req.file.buffer) html = req.file.buffer.toString('utf8');
+    if (!html.trim()) return res.status(400).json({ error: 'file or html required' });
     const pdfBuffer = await htmlToPdfBuffer(html);
     res.setHeader('Content-Type', 'application/pdf');
     res.setHeader('Content-Disposition', 'attachment; filename="slides-16x9.pdf"');
     res.send(pdfBuffer);
   } catch (err) {
-    console.error('export-pdf-upload error:', err);
     res.status(500).json({ error: err.message || 'PDF generation failed' });
   }
 });
@@ -205,7 +165,5 @@ app.get('/api/health', (_req, res) => {
 });
 
 app.listen(PORT, () => {
-  console.log(`HTML→16:9 PDF running on http://localhost:${PORT}`);
-  console.log(`  UI:  http://localhost:${PORT}/`);
-  console.log(`  API: POST /api/export-pdf  { "html": "..." }`);
+  console.log('HTML→16:9 PDF on port', PORT);
 });
