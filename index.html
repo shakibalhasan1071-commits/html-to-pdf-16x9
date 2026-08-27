@@ -1,0 +1,215 @@
+<!DOCTYPE html>
+<html lang="bn">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Export to 16:9 PDF</title>
+  <style>
+    :root {
+      --bg: #0c0a12;
+      --card: #16121f;
+      --border: rgba(167, 139, 250, 0.35);
+      --accent: #8b5cf6;
+      --text: #f4f4f5;
+      --muted: #a1a1aa;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+      background: radial-gradient(1200px 600px at 20% -10%, #2e1065 0%, var(--bg) 55%);
+      color: var(--text);
+      padding: 24px 16px 48px;
+    }
+    .wrap { max-width: 720px; margin: 0 auto; }
+    h1 {
+      font-size: 1.45rem;
+      font-weight: 800;
+      margin: 0 0 6px;
+      letter-spacing: -0.02em;
+    }
+    .sub { color: var(--muted); font-size: 0.9rem; margin: 0 0 22px; line-height: 1.45; }
+    .card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      padding: 18px 16px 16px;
+      margin-bottom: 14px;
+    }
+    label {
+      display: block;
+      font-size: 0.8rem;
+      font-weight: 700;
+      color: #c4b5fd;
+      margin-bottom: 8px;
+    }
+    textarea {
+      width: 100%;
+      min-height: 200px;
+      border-radius: 12px;
+      border: 1px solid rgba(255,255,255,0.08);
+      background: #0a0810;
+      color: var(--text);
+      padding: 12px;
+      font-family: ui-monospace, monospace;
+      font-size: 12px;
+      line-height: 1.4;
+      resize: vertical;
+    }
+    textarea:focus { outline: 2px solid rgba(139, 92, 246, 0.5); }
+    .row { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin-top: 12px; }
+    input[type="file"] {
+      font-size: 0.85rem;
+      color: var(--muted);
+      max-width: 100%;
+    }
+    .btn {
+      appearance: none;
+      border: none;
+      cursor: pointer;
+      border-radius: 12px;
+      padding: 12px 18px;
+      font-weight: 800;
+      font-size: 0.95rem;
+      background: linear-gradient(135deg, #6d28d9, #a78bfa);
+      color: #fff;
+      box-shadow: 0 8px 24px rgba(109, 40, 217, 0.35);
+    }
+    .btn:disabled {
+      opacity: 0.55;
+      cursor: not-allowed;
+      box-shadow: none;
+    }
+    .btn-ghost {
+      background: transparent;
+      border: 1px solid var(--border);
+      color: #ddd6fe;
+      box-shadow: none;
+    }
+    .status {
+      margin-top: 14px;
+      font-size: 0.85rem;
+      color: var(--muted);
+      min-height: 1.3em;
+    }
+    .status.err { color: #fca5a5; }
+    .status.ok { color: #86efac; }
+    .hint {
+      font-size: 0.75rem;
+      color: var(--muted);
+      margin-top: 10px;
+      line-height: 1.4;
+    }
+    code {
+      background: rgba(0,0,0,0.35);
+      padding: 1px 6px;
+      border-radius: 4px;
+      font-size: 0.78rem;
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <h1>Export to 16:9 PDF</h1>
+    <p class="sub">
+      HTML আপলোড বা পেস্ট করুন → সার্ভারে Puppeteer (Chrome) → নিখুঁত
+      <strong>16in × 9in</strong> PDF
+    </p>
+
+    <div class="card">
+      <label for="htmlInput">HTML পেস্ট করুন</label>
+      <textarea id="htmlInput" placeholder="<!DOCTYPE html>... বা .slide দিয়ে স্লাইড মার্কআপ"></textarea>
+
+      <div class="row">
+        <div>
+          <label for="fileInput" style="margin-bottom:4px;">বা HTML ফাইল</label>
+          <input type="file" id="fileInput" accept=".html,.htm,text/html" />
+        </div>
+      </div>
+
+      <p class="hint">
+        স্লাইড ক্লাস: <code>.slide</code> / <code>.slide-frame</code> / <code>.pg</code> —
+        প্রতিটি আলাদা পেজ হবে। ব্যাকগ্রাউন্ড প্রিন্টে আসবে (<code>printBackground</code>)।
+      </p>
+    </div>
+
+    <div class="row">
+      <button type="button" class="btn" id="exportBtn">Export to 16:9 PDF</button>
+      <button type="button" class="btn btn-ghost" id="clearBtn">ক্লিয়ার</button>
+    </div>
+    <p class="status" id="status"></p>
+  </div>
+
+  <script>
+    const htmlInput = document.getElementById('htmlInput');
+    const fileInput = document.getElementById('fileInput');
+    const exportBtn = document.getElementById('exportBtn');
+    const clearBtn = document.getElementById('clearBtn');
+    const status = document.getElementById('status');
+
+    fileInput.addEventListener('change', async () => {
+      const f = fileInput.files && fileInput.files[0];
+      if (!f) return;
+      htmlInput.value = await f.text();
+      status.textContent = 'ফাইল লোড: ' + f.name;
+      status.className = 'status ok';
+    });
+
+    clearBtn.addEventListener('click', () => {
+      htmlInput.value = '';
+      fileInput.value = '';
+      status.textContent = '';
+      status.className = 'status';
+    });
+
+    exportBtn.addEventListener('click', async () => {
+      const html = htmlInput.value.trim();
+      if (!html) {
+        status.textContent = 'HTML পেস্ট বা আপলোড করুন';
+        status.className = 'status err';
+        return;
+      }
+
+      exportBtn.disabled = true;
+      status.textContent = 'সার্ভারে PDF তৈরি হচ্ছে…';
+      status.className = 'status';
+
+      try {
+        const res = await fetch('/api/export-pdf', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ html, filename: 'slides-16x9.pdf' }),
+        });
+
+        if (!res.ok) {
+          let msg = 'Export ব্যর্থ';
+          try {
+            const j = await res.json();
+            if (j.error) msg = j.error;
+          } catch (_) {}
+          throw new Error(msg);
+        }
+
+        const blob = await res.blob();
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = 'slides-16x9.pdf';
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        URL.revokeObjectURL(url);
+
+        status.textContent = 'PDF ডাউনলোড শুরু হয়েছে (16in × 9in)';
+        status.className = 'status ok';
+      } catch (e) {
+        status.textContent = e.message || 'Error';
+        status.className = 'status err';
+      } finally {
+        exportBtn.disabled = false;
+      }
+    });
+  </script>
+</body>
+</html>
